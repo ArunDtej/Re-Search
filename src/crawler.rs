@@ -1,3 +1,3 @@
-pub mod documents;
+pub mod crawl;
 
-pub use documents::fetch_metadata;
+pub use crawl::fetch_metadata;

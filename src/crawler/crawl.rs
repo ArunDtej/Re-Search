@@ -4,6 +4,8 @@ use std::collections::HashMap;
 use url::Url;
 use chrono::Utc;
 
+use crate::common::config::random_ua;
+
 #[derive(Debug, Clone, Default)]
 pub struct PageMetadata {
     pub url: String,
@@ -31,7 +33,7 @@ pub fn fetch_metadata(url: &str) -> Result<PageMetadata, Box<dyn std::error::Err
         .arg("-L")
         .arg("--compressed")
         .arg("-m").arg("30")
-        .arg("-H").arg("User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+        .arg("-H").arg(random_ua())
         .arg("-H").arg("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
         .arg("-H").arg("Accept-Language: en-US,en;q=0.9")
         .arg("-H").arg("Accept-Encoding: gzip, deflate, br")
