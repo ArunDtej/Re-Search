@@ -1,3 +1,5 @@
 pub mod crawl;
+pub mod utils;
 
-pub use crawl::fetch_metadata;
+pub use crawl::crawl_page;
+pub use utils::clean_url;

@@ -1,10 +1,11 @@
-use scraper::{Html, Selector};
-use std::process::Command;
-use std::collections::HashMap;
-use url::Url;
 use chrono::Utc;
+use curl::easy::{Easy, List};
+use scraper::{Html, Selector};
+use std::collections::{HashMap, HashSet};
+use url::Url;
 
-use crate::common::config::random_ua;
+use crate::common::utils::random_ua;
+use crate::crawler::clean_url;
 
 #[derive(Debug, Clone, Default)]
 pub struct PageMetadata {
@@ -27,52 +28,90 @@ pub struct PageMetadata {
     pub crawl_timestamp: i64,
 }
 
-pub fn fetch_metadata(url: &str) -> Result<PageMetadata, Box<dyn std::error::Error>> {
-    // --- 1. Use curl (bypasses Cloudflare) ---
-    let output = Command::new("curl")
-        .arg("-L")
-        .arg("--compressed")
-        .arg("-m").arg("30")
-        .arg("-H").arg(random_ua())
-        .arg("-H").arg("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-        .arg("-H").arg("Accept-Language: en-US,en;q=0.9")
-        .arg("-H").arg("Accept-Encoding: gzip, deflate, br")
-        .arg("-H").arg("Sec-Fetch-Dest: document")
-        .arg("-H").arg("Sec-Fetch-Mode: navigate")
-        .arg("-H").arg("Sec-Fetch-Site: none")
-        .arg("-H").arg("Sec-Fetch-User: ?1")
-        .arg("-H").arg("Connection: keep-alive")
-        .arg(url)
-        .output()?;
+#[derive(Debug, Clone)]
+pub struct CrawlResult {
+    pub metadata: PageMetadata,
+    pub links: Vec<String>,
+}
 
-    let status = if output.status.success() { 200 } else { 403 };
-    let headers_str = String::from_utf8_lossy(&output.stderr);
-    let server = headers_str.lines()
-        .find(|l| l.starts_with("Server:"))
-        .map(|l| l.split(": ").nth(1).unwrap_or("").to_string());
+pub fn crawl_page(url: &str) -> Result<Option<CrawlResult>, Box<dyn std::error::Error>> {
+    let mut easy = Easy::new();
+    easy.url(url)?;
+    easy.follow_location(true)?;
+    easy.max_redirections(10)?;
+    easy.timeout(std::time::Duration::from_secs(30))?;
+    easy.accept_encoding("gzip, deflate")?;
+    easy.useragent(&random_ua())?;
 
-    if status == 403 {
-        return Ok(PageMetadata {
-            url: url.to_string(),
-            is_protected: true,
-            protection_reason: "HTTP 403 (curl failed)".to_string(),
-            crawl_timestamp: Utc::now().timestamp(),
-            ..Default::default()
-        });
+    // Headers
+    let mut headers = List::new();
+    headers.append("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")?;
+    headers.append("Accept-Language: en-US,en;q=0.9")?;
+    headers.append("Sec-Fetch-Dest: document")?;
+    headers.append("Sec-Fetch-Mode: navigate")?;
+    headers.append("Sec-Fetch-Site: none")?;
+    headers.append("Sec-Fetch-User: ?1")?;
+    headers.append("Connection: keep-alive")?;
+    easy.http_headers(headers)?;
+
+    // Buffers
+    let mut html_bytes = Vec::new();
+    let mut response_headers = Vec::new();
+    let (mut status_code, mut content_type, mut server, mut last_modified) =
+        (0, None, None, None);
+
+    // === Perform request ===
+    {
+        let mut transfer = easy.transfer();
+        transfer.header_function(|h| {
+            response_headers.push(String::from_utf8_lossy(h).to_string());
+            true
+        })?;
+        transfer.write_function(|d| {
+            html_bytes.extend_from_slice(d);
+            Ok(d.len())
+        })?;
+        transfer.perform()?;
     }
 
-    let html = String::from_utf8_lossy(&output.stdout).to_string();
-    let html_str = html.as_str();
+    status_code = easy.response_code()? as i32;
+    content_type = easy.content_type()?.map(|s| s.to_string());
 
-    println!("HTML length: {} bytes", html.len());
-    if html.len() > 500 {
-        println!("First 500 chars:\n{}", &html[..500]);
+    for line in &response_headers {
+        let line_lower = line.trim().to_lowercase();
+        if line_lower.starts_with("server:") {
+            server = line_lower
+                .strip_prefix("server:")
+                .map(|s| s.trim().to_string());
+        } else if line_lower.starts_with("last-modified:") {
+            last_modified = line_lower
+                .strip_prefix("last-modified:")
+                .map(|s| s.trim().to_string());
+        }
     }
 
-    // --- Parse HTML ---
-    let document = Html::parse_document(html_str);
+    // === Skip non-200 ===
+    if status_code != 200 {
+        println!("[SKIP] {} -> HTTP {}", url, status_code);
+        return Ok(None);
+    }
 
-    let title = document.select(&Selector::parse("title").unwrap())
+    // === Non-HTML ===
+    let is_html = content_type
+        .as_deref()
+        .map(|ct| ct.contains("text/html"))
+        .unwrap_or(false);
+    if !is_html {
+        println!("[SKIP] {} -> Non-HTML ({:?})", url, content_type);
+        return Ok(None);
+    }
+
+    // === Parse HTML ===
+    let html = String::from_utf8_lossy(&html_bytes).to_string();
+    let document = Html::parse_document(&html);
+
+    let title = document
+        .select(&Selector::parse("title").unwrap())
         .next()
         .map(|t| t.text().collect::<String>().trim().to_string());
 
@@ -98,24 +137,60 @@ pub fn fetch_metadata(url: &str) -> Result<PageMetadata, Box<dyn std::error::Err
         }
     }
 
-    if let Some(link) = document.select(&Selector::parse("link[rel='canonical']").unwrap()).next() {
+    if let Some(link) = document
+        .select(&Selector::parse("link[rel='canonical']").unwrap())
+        .next()
+    {
         canonical_url = link.attr("href").map(|s| s.to_string());
     }
 
-    let h1 = document.select(&Selector::parse("h1").unwrap())
+    let h1 = document
+        .select(&Selector::parse("h1").unwrap())
         .next()
         .map(|h| h.text().collect::<String>().trim().to_string());
 
-    let lang = document.select(&Selector::parse("html").unwrap())
+    let lang = document
+        .select(&Selector::parse("html").unwrap())
         .next()
         .and_then(|html| html.attr("lang"))
         .map(|s| s.to_string());
+
+    // === Extract links ===
+    let mut links_set = HashSet::new();
+    let base_url = Url::parse(url).ok();
+
+    for elem in document.select(&Selector::parse("a[href]").unwrap()) {
+        let Some(href) = elem.attr("href") else { continue; };
+        let rel = elem.attr("rel").unwrap_or("");
+        if href.starts_with("javascript:")
+            || href.starts_with("mailto:")
+            || href.starts_with("tel:")
+            || rel.contains("nofollow")
+            || rel.contains("noopener")
+            || rel.contains("noreferrer")
+            || rel.contains("ugc")
+            || rel.contains("sponsored")
+        {
+            continue;
+        }
+        if let Some(resolved) = resolve_url(url, href, &base_url) {
+            links_set.insert(resolved);
+        }
+    }
+
+    let mut cleaned_links = HashSet::new();
+    for raw_url in links_set {
+        if let Some(cleaned) = clean_url(&raw_url) {
+            cleaned_links.insert(cleaned);
+        }
+    }
+    let links: Vec<String> = cleaned_links.into_iter().collect();
 
     let mut metadata = PageMetadata {
         url: url.to_string(),
         title,
         meta_description,
-        canonical_url,
+        canonical_url: canonical_url.clone(),
         robots,
         lang,
         h1,
@@ -123,14 +198,16 @@ pub fn fetch_metadata(url: &str) -> Result<PageMetadata, Box<dyn std::error::Err
         og_description: og.get("og:description").cloned(),
         og_image: og.get("og:image").cloned(),
         og_url: og.get("og:url").cloned(),
-        content_type: Some("text/html".to_string()),
-        last_modified: None,
+        content_type,
+        last_modified,
         server,
         is_protected: false,
         protection_reason: "public".to_string(),
         crawl_timestamp: Utc::now().timestamp(),
+        ..Default::default()
     };
 
+    // Resolve canonical
     if let Some(canonical) = &metadata.canonical_url {
         if let Ok(base) = Url::parse(url) {
             if let Ok(resolved) = base.join(canonical) {
@@ -139,5 +216,30 @@ pub fn fetch_metadata(url: &str) -> Result<PageMetadata, Box<dyn std::error::Err
         }
     }
 
-    Ok(metadata)
+    Ok(Some(CrawlResult { metadata, links }))
+}
+
+fn resolve_url(base_str: &str, href: &str, fallback_base: &Option<Url>) -> Option<String> {
+    let trimmed = href.trim();
+    if trimmed.is_empty()
+        || trimmed.starts_with('#')
+        || trimmed.starts_with("javascript:")
+        || trimmed.starts_with("mailto:")
+    {
+        return None;
+    }
+    if let Ok(url) = Url::parse(trimmed) {
+        return Some(url.to_string());
+    }
+    if let Ok(base) = Url::parse(base_str) {
+        if let Ok(joined) = base.join(trimmed) {
+            return Some(joined.to_string());
+        }
+    }
+    if let Some(base) = fallback_base {
+        if let Ok(joined) = base.join(trimmed) {
+            return Some(joined.to_string());
+        }
+    }
+    None
 }

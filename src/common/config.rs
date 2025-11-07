@@ -1,5 +1,3 @@
-use rand::prelude::*;
-
 pub const UA: [&str; 28] = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -40,9 +38,3 @@ pub const UA: [&str; 28] = [
     "Mozilla/5.0 (Linux; U; Android 14; en-US; SM-G998U) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 UCBrowser/16.2.4.1216 Mobile Safari/537.36"
 
 ];
-
-
-pub fn random_ua() -> &'static str {
-    let mut rng = rand::thread_rng();
-    UA.choose(&mut rng).unwrap_or(&UA[0])
-}

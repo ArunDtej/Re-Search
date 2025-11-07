@@ -6,11 +6,19 @@ fn main() {
     db::connect_db();
     db::init_db::connect_db();
 
-    let metadata =  crawler::fetch_metadata("https://ecpapers.reec.org/paper/eugwpaper/ki-01-25-150-en-n.htm");
+    // let metadata =  crawler::crawl_page("https://search.app.goo.gl/");
 
-    eprintln!("Final metadata: {:#?}", metadata);
+    let url = "https://google.com";
 
-    println!("{:#?}",  common::config::UA);
+    match crawler::crawl_page(url) {
+        Ok(Some(res)) => eprintln!("Final metadata: {:#?}", res),
+        Ok(None) => {
+            println!("⚠️ Skipped: {}", url);
+        }
+        Err(e) => {
+            eprintln!("❌ Error: {} -> {}", url, e);
+        }  
+    };
     
     println!("Hello, world!");
 }
