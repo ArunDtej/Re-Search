@@ -1,4 +1,4 @@
-docker run -d --name postgres-ubac \
+docker run -d --name postgres-research \
   --restart=unless-stopped \
   -e POSTGRES_USER=ubac@user \
   -e POSTGRES_PASSWORD=ubac@ubac\
@@ -18,7 +18,7 @@ docker run -d \
   apache/kvrocks:latest
 
 
-docker run -d --name clickhouse-ubac \
+docker run -d --name clickhouse-research \
   --restart=unless-stopped \
   -p 9000:9000 -p 8123:8123 \
   -e CLICKHOUSE_USER=ubac \
@@ -27,7 +27,7 @@ docker run -d --name clickhouse-ubac \
   clickhouse/clickhouse-server
 
 
-docker run -d --name redis-ubac --restart=always -p 8001:6379 redis
+docker run -d --name redis-research --restart=unless-stopped -p 6379:6379 redis
 
 docker stop redis-ubac
 docker rm redis-ubac
