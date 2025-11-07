@@ -1,0 +1,62 @@
+docker run -d --name postgres-ubac \
+  --restart=unless-stopped \
+  -e POSTGRES_USER=ubac@user \
+  -e POSTGRES_PASSWORD=ubac@ubac\
+  -e POSTGRES_DB=ubacdb \
+  -p 5432:5432 \
+  postgres -c max_connections=400
+
+
+docker volume create kvrocks_data
+
+docker run -d \
+  --name kvrocks \
+  -p 6666:6666 \
+  -v kvrocks_data:/data \
+  --restart unless-stopped \
+  --platform linux/arm64/v8 \
+  apache/kvrocks:latest
+
+
+docker run -d --name clickhouse-ubac \
+  --restart=unless-stopped \
+  -p 9000:9000 -p 8123:8123 \
+  -e CLICKHOUSE_USER=ubac \
+  -e CLICKHOUSE_PASSWORD=ubac@ubac \
+  -e CLICKHOUSE_DB=ubac \
+  clickhouse/clickhouse-server
+
+
+docker run -d --name redis-ubac --restart=always -p 8001:6379 redis
+
+docker stop redis-ubac
+docker rm redis-ubac
+docker stop kvrocks && docker rm kvrocks
+
+docker start redis-ubac
+docker start postgres-ubac
+docker start clickhouse-ubac
+
+docker exec -it clickhouse-ubac clickhouse-client -u ubac --password=ubac@ubac
+
+SELECT 
+    table,
+    formatReadableSize(sum(bytes_on_disk)) AS size
+FROM system.parts
+WHERE database = 'ubac' AND table = 'ClientLog'
+GROUP BY table;
+
+
+SELECT 
+    database,
+    formatReadableSize(sum(bytes_on_disk)) AS size
+FROM system.parts
+GROUP BY database
+ORDER BY sum(bytes_on_disk) DESC;
+
+
+docker exec -it postgres-ubac psql -U "ubac@user" -d ubacdb
+
+
+SELECT datname, pg_size_pretty(pg_database_size(datname)) AS size
+FROM pg_database;

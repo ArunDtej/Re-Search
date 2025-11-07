@@ -1,17 +1,20 @@
 mod db;
 mod crawler;
 mod common;
+use std::env;
+use dotenvy::dotenv;
+
 fn main() {
 
-    db::connect_db();
-    db::init_db::connect_db();
+    dotenv().ok();
 
-    // let metadata =  crawler::crawl_page("https://search.app.goo.gl/");
 
-    let url = "https://google.com";
+    let url = "https://bluecloudsoftech.com";
 
     match crawler::crawl_page(url) {
-        Ok(Some(res)) => eprintln!("Final metadata: {:#?}", res),
+        Ok(Some(res)) => {
+            // eprintln!("Final metadata: {:#?}", res)
+        },
         Ok(None) => {
             println!("⚠️ Skipped: {}", url);
         }

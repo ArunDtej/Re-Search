@@ -26,6 +26,7 @@ pub struct PageMetadata {
     pub is_protected: bool,
     pub protection_reason: String,
     pub crawl_timestamp: i64,
+    pub cleaned_text: Option<String>, // ✅ new field
 }
 
 #[derive(Debug, Clone)]
@@ -47,10 +48,6 @@ pub fn crawl_page(url: &str) -> Result<Option<CrawlResult>, Box<dyn std::error::
     let mut headers = List::new();
     headers.append("Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")?;
     headers.append("Accept-Language: en-US,en;q=0.9")?;
-    headers.append("Sec-Fetch-Dest: document")?;
-    headers.append("Sec-Fetch-Mode: navigate")?;
-    headers.append("Sec-Fetch-Site: none")?;
-    headers.append("Sec-Fetch-User: ?1")?;
     headers.append("Connection: keep-alive")?;
     easy.http_headers(headers)?;
 
@@ -80,9 +77,7 @@ pub fn crawl_page(url: &str) -> Result<Option<CrawlResult>, Box<dyn std::error::
     for line in &response_headers {
         let line_lower = line.trim().to_lowercase();
         if line_lower.starts_with("server:") {
-            server = line_lower
-                .strip_prefix("server:")
-                .map(|s| s.trim().to_string());
+            server = line_lower.strip_prefix("server:").map(|s| s.trim().to_string());
         } else if line_lower.starts_with("last-modified:") {
             last_modified = line_lower
                 .strip_prefix("last-modified:")
@@ -186,6 +181,9 @@ pub fn crawl_page(url: &str) -> Result<Option<CrawlResult>, Box<dyn std::error::
     }
     let links: Vec<String> = cleaned_links.into_iter().collect();
 
+    // === Cleaned Text Extraction ===
+    let cleaned_text = extract_clean_text(&html);
+
     let mut metadata = PageMetadata {
         url: url.to_string(),
         title,
@@ -204,6 +202,7 @@ pub fn crawl_page(url: &str) -> Result<Option<CrawlResult>, Box<dyn std::error::
         is_protected: false,
         protection_reason: "public".to_string(),
         crawl_timestamp: Utc::now().timestamp(),
+        cleaned_text: Some(cleaned_text), // ✅ include text
         ..Default::default()
     };
 
@@ -242,4 +241,79 @@ fn resolve_url(base_str: &str, href: &str, fallback_base: &Option<Url>) -> Optio
         }
     }
     None
+}
+
+// use scraper::{Html, Selector};
+
+/// Extracts visible, human-readable text (no HTML, no CSS, no JS)
+fn extract_clean_text(html: &str) -> String {
+    // Parse the document
+    let document = Html::parse_document(html);
+
+    // Remove all <script>, <style>, <noscript>, <iframe>, <svg>, etc. first
+    let skip_tags = [
+        "script",
+        "style",
+        "noscript",
+        "iframe",
+        "canvas",
+        "svg",
+        "meta",
+        "link",
+        "button",
+        "input",
+        "form",
+        "nav",
+        "footer",
+        "header",
+    ];
+
+    // Collect text only from content-bearing elements
+    let mut text = String::new();
+    for selector in ["p", "article", "section", "main", "div", "span", "li"].iter() {
+        let sel = Selector::parse(selector).unwrap();
+        for elem in document.select(&sel) {
+            // Skip if this element (or its parent) is inside one of the skip tags
+            let mut inside_skipped = false;
+            let mut parent = elem.parent();
+            while let Some(p) = parent {
+                if let Some(el) = p.value().as_element() {
+                    if skip_tags.contains(&el.name()) {
+                        inside_skipped = true;
+                        break;
+                    }
+                }
+                parent = p.parent();
+            }
+            if inside_skipped {
+                continue;
+            }
+
+            // Extract visible text nodes
+            for txt in elem.text() {
+                let t = txt.trim();
+                if !t.is_empty()
+                    && !t.starts_with('{')
+                    && !t.ends_with('}')
+                    && !t.contains("var(")
+                    && !t.contains(':') // filter out CSS rules
+                    && !t.contains(';')
+                {
+                    text.push_str(t);
+                    text.push(' ');
+                }
+            }
+        }
+    }
+
+    // Normalize whitespace
+    let cleaned = text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+
+    // Limit to prevent enormous pages
+    cleaned.chars().take(8000).collect()
 }
