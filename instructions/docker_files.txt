@@ -1,3 +1,6 @@
+colima status
+colima start
+
 docker run -d --name postgres-research \
   --restart=unless-stopped \
   -e POSTGRES_USER=ubac@user \
