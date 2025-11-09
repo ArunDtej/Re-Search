@@ -4,8 +4,6 @@ mod common;
 use std::env;
 use dotenvy::dotenv;
 
-use crate::db::write_to_kvrocks_stream;
-
 fn main() {
 
     dotenv().ok();
@@ -16,7 +14,7 @@ fn main() {
     match crawler::crawl_page(url) {
         Ok(Some(res)) => {
             // eprintln!("Final metadata: {:#?}", res)
-            write_to_kvrocks_stream("stream", "data");
+            println!("{}",res.links.len());
         },
         Ok(None) => {
             println!("⚠️ Skipped: {}", url);

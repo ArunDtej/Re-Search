@@ -32,16 +32,14 @@ pub fn set(key: &str, value: &str, mut conn: PooledConnection<RedisConnectionMan
     }
 }
 
-pub fn write_to_kvrocks_stream(stream: &str, data: &str) -> RedisResult<()> {
+pub fn write_to_kvrocks_list(list_name: &str, data: &str) -> RedisResult<()> {
     let mut conn = get_kv_conn();
 
-    let id: String = cmd("XADD")
-        .arg(stream)
-        .arg("*")
-        .arg("data")
+    let list_len: i64 = cmd("LPUSH")
+        .arg(list_name)
         .arg(data)
         .query(&mut *conn)?;
 
-    println!("✅ Wrote entry to stream `{}` with ID `{}`", stream, id);
+    println!("✅ Added to list `{}` (new length = {})", list_name, list_len);
     Ok(())
 }

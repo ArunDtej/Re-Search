@@ -1,7 +1,7 @@
 pub mod init_db;
 pub mod kv;
+pub mod paths;
 
 pub use init_db::get_kv_conn;
-pub use kv::{set, get, write_to_kvrocks_stream};
 
 // pub use init_db::pool;
