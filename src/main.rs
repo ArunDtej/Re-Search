@@ -7,22 +7,6 @@ fn main() {
 
     dotenv().ok();
 
-
-    let url = "https://bluecloudsoftech.com";
-
     crawler::core::traverse();
-    // match crawler::crawl_page(url) {
-    //     Ok(Some(res)) => {
-    //         // eprintln!("Final metadata: {:#?}", res)
-    //         println!("{}",res.links.len());
-    //     },
-    //     Ok(None) => {
-    //         println!("⚠️ Skipped: {}", url);
-    //     }
-    //     Err(e) => {
-    //         eprintln!("❌ Error: {} -> {}", url, e);
-    //     }  
-    // };
-    
     println!("Hello, world!");
 }

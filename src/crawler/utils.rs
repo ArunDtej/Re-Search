@@ -26,7 +26,6 @@ pub fn clean_url(url: &str) -> Option<String> {
 
 pub fn hash_links(
     links: &Vec<String>,
-    crawl_set: &str,
 ) -> RedisResult<Vec<(String, String)>> {
     let mut hashed_links = Vec::new();
 
@@ -37,8 +36,7 @@ pub fn hash_links(
 
         let mut hasher = Sha1::new();
         hasher.update(link.as_bytes());
-        let hash = format!("{:x}", hasher.finalize());
-        let key = format!("{}:{}", crawl_set, hash);
+        let key = format!("{:x}", hasher.finalize());
 
         hashed_links.push((link.clone(), key));
     }

@@ -42,6 +42,22 @@ docker start clickhouse-ubac
 
 docker exec -it clickhouse-ubac clickhouse-client -u ubac --password=ubac@ubac
 
+docker run -d \
+  --name kvrocks \
+  -p 6666:6666 \
+  -v kvrocks_data:/data \
+  --restart unless-stopped \
+  apache/kvrocks:latest
+
+docker run -d \
+  --name kvrocks \
+  -p 6666:6666 \
+  -v kvrocks_data:/data \
+  --restart unless-stopped \
+  --platform linux/amd64 \
+  apache/kvrocks:latest
+
+
 SELECT 
     table,
     formatReadableSize(sum(bytes_on_disk)) AS size

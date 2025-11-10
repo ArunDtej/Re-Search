@@ -1,3 +1,23 @@
+use phf::phf_set;
+
+pub const DOMAINS_SET: phf::Set<&'static str> = phf_set! {
+    "arxiv.org", 
+    "github.com", 
+    "springer.com", 
+    "nasa.gov", 
+    "nist.gov",
+    "space.com", 
+    "livescience.com", 
+    "preprints.org", 
+    "eartharxiv.org", 
+    "engrxiv.org",
+    "econpapers.repec.org", 
+    "frontiersin.org", 
+    "europepme.org", 
+    "chemrxiv.org",
+};
+
+
 pub const UA: [&str; 28] = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
