@@ -50,29 +50,7 @@ async fn crawler_thread() {
             }
             None => {
 
-                let len: i64 = cmd("LLEN")
-                    .arg(paths::CRAWL_LIST_PATH)
-                    .query(&mut *conn)
-                    .unwrap_or(0);
-
-                if len == 0 {
-                    println!("⚙️ No URLs left — refilling from DOMAINS_SET...");
-
-                    let domains = DOMAINS_SET;
-                    for domain in &domains {
-                        let full_url = format!("https://{}", domain);
-
-                        let _: RedisResult<()> = cmd("LPUSH")
-                            .arg(paths::CRAWL_LIST_PATH)
-                            .arg(&full_url)
-                            .query(&mut *conn);
-                    }
-
-                    println!("✅ Refilled {} domains into crawl list", domains.len());
-                } else {
-                    // The queue got refilled by another thread already
-                    println!("🕓 Queue already refilled by another crawler (len={})", len);
-                }
+                refill_if_empty(&mut conn).await;
 
                 sleep(Duration::from_secs(10)).await;
             }
@@ -141,11 +119,59 @@ fn ensure_bloom_filter(conn: &mut r2d2::PooledConnection<RedisConnectionManager>
     let _: RedisResult<()> = cmd("BF.RESERVE")
         .arg("crawl_seen") // filter key
         .arg(0.01) // 1% false positive rate
-        .arg(1_000_000) // initial capacity
+        .arg(1_000_000_000) // initial capacity
         .query(&mut **conn);
 
     let _: RedisResult<()> = cmd("EXPIRE")
         .arg("crawl_seen")
         .arg(60 * 60 * 24 * 31) // seconds
         .query(&mut **conn);
+}
+
+
+async fn refill_if_empty(conn: &mut r2d2_redis::redis::Connection) {
+    let len: i64 = cmd("LLEN")
+        .arg(paths::CRAWL_LIST_PATH)
+        .query(conn)
+        .unwrap_or(0);
+
+    if len == 0 {
+        // Try acquiring lock (SETNX returns 1 if lock acquired, 0 if already set)
+        let got_lock: bool = cmd("SETNX")
+            .arg("crawler:refill_lock")
+            .arg(1)
+            .query(conn)
+            .unwrap_or(false);
+
+        if got_lock {
+            println!("⚙️ Acquired lock — refilling from DOMAINS_SET...");
+
+            // Optional: auto-expire lock after 30s to avoid deadlocks
+            let _: RedisResult<()> = cmd("EXPIRE")
+                .arg("crawler:refill_lock")
+                .arg(30)
+                .query(conn);
+
+            // Perform refill
+            let domains = DOMAINS_SET;
+            for domain in &domains {
+                let full_url = format!("https://{}", domain);
+                let _: RedisResult<()> = cmd("LPUSH")
+                    .arg(paths::CRAWL_LIST_PATH)
+                    .arg(&full_url)
+                    .query(conn);
+            }
+
+            println!("✅ Refilled {} domains into crawl list", domains.len());
+
+            // Release lock
+            let _: RedisResult<()> = cmd("DEL").arg("crawler:refill_lock").query(conn);
+        } else {
+            println!("🕓 Another thread is already refilling, waiting...");
+        }
+    } else {
+        println!("🕓 Queue not empty (len={})", len);
+    }
+
+    sleep(Duration::from_secs(10)).await;
 }

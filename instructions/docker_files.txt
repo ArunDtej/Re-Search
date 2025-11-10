@@ -1,6 +1,13 @@
 colima status
 colima start
 
+docker run -d \
+  --name quickwit \
+  -p 7280:7280 \
+  quickwit/quickwit:latest run
+
+
+
 docker run -d --name postgres-research \
   --restart=unless-stopped \
   -e POSTGRES_USER=ubac@user \

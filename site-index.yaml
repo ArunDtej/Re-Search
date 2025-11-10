@@ -1,0 +1,105 @@
+version: 0.8 # matches your Quickwit version (0.8.2)
+
+index_id: "pages"
+index_uri: "file:///var/lib/quickwit/indexes/pages"
+
+doc_mapping:
+  mode: lenient
+
+  field_mappings:
+    - name: url
+      type: text
+      tokenizer: raw
+      stored: true
+      fast: true
+
+    - name: title
+      type: text
+      tokenizer: default
+      stored: true
+
+    - name: meta_description
+      type: text
+      tokenizer: default
+      stored: true
+
+    - name: h1
+      type: text
+      tokenizer: default
+      stored: true
+
+    - name: last_modified
+      type: text
+      tokenizer: raw
+      stored: true
+
+    - name: crawl_timestamp
+      type: datetime
+      input_formats:
+        - unix_timestamp
+      output_format: unix_timestamp_secs
+      fast: true
+      stored: true
+
+    - name: cleaned_text
+      type: text
+      tokenizer: default
+      record: position
+      stored: false
+      fast: false
+
+  tag_fields: ["url"]
+  timestamp_field: crawl_timestamp
+  index_field_presence: true
+
+search_settings:
+  default_search_fields: [title, h1, meta_description, cleaned_text]
+
+
+# docker stop quickwit
+# docker rm quickwit
+
+# docker run -d \
+#   --name quickwit \
+#   -p 7280:7280 \
+#   -v /var/lib/quickwit:/var/lib/quickwit \
+#   -e QW_INGEST_FLUSH_INTERVAL_SECS=5 \
+#   -e QW_INGEST_FORCE_FLUSH_MIN_INTERVAL_SECS=2 \
+#   quickwit/quickwit:latest run
+
+
+# docker run -d \
+#   --name quickwit \
+#   -p 7280:7280 \
+#   -e QW_INGEST_FLUSH_INTERVAL_SECS=10 \
+#   quickwit/quickwit:latest run
+
+
+# curl -XPOST http://localhost:7280/api/v1/indexes -H "content-type: application/yaml" --data-binary @site-index.yaml
+
+# docker exec quickwit quickwit index describe --index pages
+
+# curl http://127.0.0.1:7280/api/v1/pages/search?query=title:INF
+
+curl -XPOST "http://127.0.0.1:7280/api/v1/pages/ingest" \
+  -H "Content-Type: application/x-ndjson" \
+  --data-binary @- <<'EOF'
+{"url":"https://example.com/new1","title":"New Page 3","crawl_timestamp":1731240000,"cleaned_text":"Some example text"}
+{"url":"https://example.com/new2","title":"New Page 4","crawl_timestamp":1731240000,"cleaned_text":"Another text"}
+EOF
+
+
+# curl -XPOST "http://127.0.0.1:7280/api/v1/pages/ingest" \
+#   -H "Content-Type: application/x-ndjson" \
+#   --data-binary @- <<'EOF'
+# {"url":"https://example.com","title":"Example Domain","meta_description":"This domain is used for examples in documentation.","h1":"Welcome to Example.com","last_modified":"2025-11-10T12:00:00Z","crawl_timestamp":1731240000,"cleaned_text":"This is an example webpage used for demonstration of Quickwit indexing."}
+# EOF
+
+# curl -XPOST "http://127.0.0.1:7280/api/v1/pages/search" \
+#   -H "Content-Type: application/json" \
+#   -d '{
+#     "query": "title:Domain",
+#     "sort_by_field": "_score"
+#   }'
+
+

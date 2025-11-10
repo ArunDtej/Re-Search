@@ -1,0 +1,45 @@
+{
+    "url": "https://example.com",
+    "title": "Example Domain",
+    "meta_description": "This domain is used for examples in documentation.",
+    "h1": "Welcome to Example.com",
+    "last_modified": "2025-11-10T12:00:00Z",
+    "crawl_timestamp": 1731240000,
+    "cleaned_text": "This is an example webpage used for demonstration of Quickwit indexing."
+}
+{
+    "url": "https://rust-lang.org",
+    "title": "Rust Programming Language",
+    "meta_description": "Empowering everyone to build reliable and efficient software.",
+    "h1": "Rust: Fast, Reliable, Productive",
+    "last_modified": "2025-11-09T18:00:00Z",
+    "crawl_timestamp": 1731230000,
+    "cleaned_text": "Rust is a systems programming language focused on safety, speed, and concurrency."
+}
+{
+    "url": "https://openai.com",
+    "title": "OpenAI",
+    "meta_description": "Creating safe artificial general intelligence that benefits all of humanity.",
+    "h1": "Discover OpenAI",
+    "last_modified": "2025-11-08T10:00:00Z",
+    "crawl_timestamp": 1731220000,
+    "cleaned_text": "OpenAI develops AI systems like ChatGPT and DALL-E that push the boundaries of machine learning."
+}
+{
+    "url": "https://docs.python.org",
+    "title": "Python Documentation",
+    "meta_description": "Official Python language reference and tutorials.",
+    "h1": "Python Docs",
+    "last_modified": "2025-11-07T15:00:00Z",
+    "crawl_timestamp": 1731210000,
+    "cleaned_text": "Python is an interpreted language used for web development, data science, and automation."
+}
+{
+    "url": "https://news.ycombinator.com",
+    "title": "Hacker News",
+    "meta_description": "A social news website focusing on computer science and entrepreneurship.",
+    "h1": "Hacker News",
+    "last_modified": "2025-11-10T09:00:00Z",
+    "crawl_timestamp": 1731250000,
+    "cleaned_text": "Hacker News is a technology and startup-focused social news aggregator run by Y Combinator."
+}
