@@ -1,24 +1,39 @@
+use crate::common::DOMAINS_SET;
 use crate::crawler::crawl::crawl_page;
+use crate::crawler::utils;
 use crate::db::get_kv_conn;
 use crate::db::paths;
-use crate::crawler::utils;
 use r2d2_redis::redis::{RedisResult, cmd, pipe};
-use crate::common::DOMAINS_SET;
 
 // use redis::{cmd, pipe, Commands, RedisResult};
 use r2d2_redis::RedisConnectionManager;
 
-use std::thread;
 use std::time::Duration;
 
-pub fn traverse() {
+use tokio::task;
+use tokio::time::sleep;
+
+#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
+pub async fn traverse() {
     let mut conn = get_kv_conn();
-    ensure_bloom_filter(&mut conn);  // optional (auto creates filter if missing)
-    crawler_thread()
+    ensure_bloom_filter(&mut conn); // optional (auto creates filter if missing)
+
+    let num_tasks: u16 = 200; // lightweight async tasks
+
+    for i in 0..num_tasks {
+        task::spawn(async move {
+            println!("🚀 async crawler #{}", i + 1);
+            crawler_thread().await;
+        });
+    }
+
+    // keep main alive
+    loop {
+        sleep(Duration::from_secs(3600)).await;
+    }
 }
 
-
-fn crawler_thread() {
+async fn crawler_thread() {
     let crawl_list = paths::CRAWL_LIST_PATH;
     let mut conn: r2d2::PooledConnection<r2d2_redis::RedisConnectionManager> = get_kv_conn();
 
@@ -31,52 +46,59 @@ fn crawler_thread() {
         match url {
             Some(url) => {
                 let _ = index_url(&url);
-                thread::sleep(Duration::from_secs(1));
+                sleep(Duration::from_secs(1)).await;
             }
             None => {
 
-                println!("⚙️ No URLs left — refilling from DOMAINS_SET...");
+                let len: i64 = cmd("LLEN")
+                    .arg(paths::CRAWL_LIST_PATH)
+                    .query(&mut *conn)
+                    .unwrap_or(0);
 
-                let domains = DOMAINS_SET;
-                for domain in &domains {
-                    let full_url = format!("https://{}", domain);
+                if len == 0 {
+                    println!("⚙️ No URLs left — refilling from DOMAINS_SET...");
 
-                    let _: RedisResult<()> = cmd("LPUSH")
-                        .arg(paths::CRAWL_LIST_PATH)
-                        .arg(&full_url)
-                        .query(&mut *conn);
+                    let domains = DOMAINS_SET;
+                    for domain in &domains {
+                        let full_url = format!("https://{}", domain);
+
+                        let _: RedisResult<()> = cmd("LPUSH")
+                            .arg(paths::CRAWL_LIST_PATH)
+                            .arg(&full_url)
+                            .query(&mut *conn);
+                    }
+
+                    println!("✅ Refilled {} domains into crawl list", domains.len());
+                } else {
+                    // The queue got refilled by another thread already
+                    println!("🕓 Queue already refilled by another crawler (len={})", len);
                 }
 
-                println!("✅ Refilled {} domains into crawl list", domains.len());
-                thread::sleep(Duration::from_secs(10));
+                sleep(Duration::from_secs(10)).await;
             }
         }
     }
 }
 
-fn index_url(url: &str) -> Result<(), Box<dyn std::error::Error>>  {
-    let data = crawl_page(url);
+async fn index_url(url: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let url_owned = url.to_string();
+    let data = tokio::task::spawn_blocking(move || crawl_page(&url_owned)).await??;
 
     let mut conn: r2d2::PooledConnection<r2d2_redis::RedisConnectionManager> = get_kv_conn();
 
     match data {
-        Ok(Some(res)) => {
+        Some(res) => {
             let new_urls = utils::hash_links(&res.links)?;
             let _ = enqueue_and_mark_seen(&new_urls, &mut conn);
 
-            println!("{} {}", url,new_urls.len());
+            println!("{} {}", url, new_urls.len());
         }
-        Ok(None) => {
+        None => {
             println!("⚠️ Skipped: {}", url);
-        }
-        Err(e) => {
-            eprintln!("❌ Error: {} -> {}", url, e);
         }
     };
     Ok(())
 }
-
-
 
 fn enqueue_and_mark_seen(
     new_urls: &[(String, String)], // (url, hash)
@@ -115,17 +137,15 @@ fn enqueue_and_mark_seen(
     Ok(())
 }
 
-
 fn ensure_bloom_filter(conn: &mut r2d2::PooledConnection<RedisConnectionManager>) {
     let _: RedisResult<()> = cmd("BF.RESERVE")
-        .arg("crawl_seen")   // filter key
-        .arg(0.01)           // 1% false positive rate
-        .arg(1_000_000)      // initial capacity
+        .arg("crawl_seen") // filter key
+        .arg(0.01) // 1% false positive rate
+        .arg(1_000_000) // initial capacity
         .query(&mut **conn);
 
-    let _: RedisResult<()> = cmd("EXPIRE") 
+    let _: RedisResult<()> = cmd("EXPIRE")
         .arg("crawl_seen")
-        .arg(60 * 60 * 24 * 31) // seconds 
+        .arg(60 * 60 * 24 * 31) // seconds
         .query(&mut **conn);
-
 }
