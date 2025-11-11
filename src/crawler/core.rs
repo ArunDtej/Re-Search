@@ -17,12 +17,11 @@ use tokio::task;
 use tokio::time::sleep;
 use serde_json::json;
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 pub async fn traverse() {
     let mut conn = get_kv_conn();
     ensure_bloom_filter(&mut conn); // optional (auto creates filter if missing)
 
-    let num_tasks: u16 = 2; // lightweight async tasks
+    let num_tasks: u16 = 8; // lightweight async tasks
 
     for i in 0..num_tasks {
         task::spawn(async move {
