@@ -73,7 +73,9 @@ async fn index_url(url: &str) -> Result<(), Box<dyn std::error::Error + Send + S
     match data {
         Some(res) => {
             let new_urls = utils::hash_links(&res.links)?;
-            let _ = enqueue_and_mark_seen(&new_urls, &mut conn);
+            let urls_owned = new_urls.clone();    
+            
+            let _ = tokio::task::spawn_blocking(move || enqueue_and_mark_seen(&new_urls, &mut conn)).await;
 
             let docs = json!([
                 {
@@ -88,7 +90,16 @@ async fn index_url(url: &str) -> Result<(), Box<dyn std::error::Error + Send + S
             ]);
 
             ingest_to_quickwit(&docs, "http://127.0.0.1:7280/api/v1/pages/ingest").await?;
-            utils::back_link_score(url, &new_urls).await;
+
+            let link_owned = url.to_string();      // Own the String
+             
+            tokio::task::spawn_blocking(move || {
+                // ✅ Use the owned values directly — don't create new temporary strings
+                utils::back_link_score(&link_owned, &urls_owned);
+            })
+            .await
+            .expect("backlink score task failed");
+
         }
         None => {
             println!("⚠️ Skipped: {}", url);
@@ -98,7 +109,7 @@ async fn index_url(url: &str) -> Result<(), Box<dyn std::error::Error + Send + S
 }
 
 fn enqueue_and_mark_seen(
-    new_urls: &[(String, String)], // (url, hash)
+   new_urls: &[(String, String)], // (url, hash)
     conn: &mut r2d2::PooledConnection<RedisConnectionManager>,
 ) -> RedisResult<()> {
     if new_urls.is_empty() {
