@@ -5,20 +5,24 @@ use crate::db::get_kv_conn;
 use crate::db::paths;
 use r2d2_redis::redis::{RedisResult, cmd, pipe};
 
-// use redis::{cmd, pipe, Commands, RedisResult};
+use anyhow::Result;
+use reqwest::Client;
+use serde_json::Value;
+
 use r2d2_redis::RedisConnectionManager;
 
 use std::time::Duration;
 
 use tokio::task;
 use tokio::time::sleep;
+use serde_json::json;
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 pub async fn traverse() {
     let mut conn = get_kv_conn();
     ensure_bloom_filter(&mut conn); // optional (auto creates filter if missing)
 
-    let num_tasks: u16 = 200; // lightweight async tasks
+    let num_tasks: u16 = 2; // lightweight async tasks
 
     for i in 0..num_tasks {
         task::spawn(async move {
@@ -45,13 +49,14 @@ async fn crawler_thread() {
 
         match url {
             Some(url) => {
-                let _ = index_url(&url);
+                println!("Fetched url {}", url);
+                let res = index_url(&url).await;
+                // println!("{:?}", res);
+
                 sleep(Duration::from_secs(1)).await;
             }
             None => {
-
                 refill_if_empty(&mut conn).await;
-
                 sleep(Duration::from_secs(10)).await;
             }
         }
@@ -60,8 +65,9 @@ async fn crawler_thread() {
 
 async fn index_url(url: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let url_owned = url.to_string();
-    let data = tokio::task::spawn_blocking(move || crawl_page(&url_owned)).await??;
+    let data: Option<super::crawl::CrawlResult> = tokio::task::spawn_blocking(move || crawl_page(&url_owned)).await??;
 
+    // println!("Crawled data for {}, data {:?}", url, data);
     let mut conn: r2d2::PooledConnection<r2d2_redis::RedisConnectionManager> = get_kv_conn();
 
     match data {
@@ -69,7 +75,20 @@ async fn index_url(url: &str) -> Result<(), Box<dyn std::error::Error + Send + S
             let new_urls = utils::hash_links(&res.links)?;
             let _ = enqueue_and_mark_seen(&new_urls, &mut conn);
 
-            println!("{} {}", url, new_urls.len());
+            let docs = json!([
+                {
+                    "url": res.metadata.url ,
+                    "title": res.metadata.title,
+                    "crawl_timestamp": res.metadata.crawl_timestamp,
+                    "cleaned_text": res.metadata.cleaned_text,
+                    "meta_description": res.metadata.meta_description,
+                    "last_modified": res.metadata.last_modified,
+                    "h1": res.metadata.h1,
+                }
+            ]);
+
+            ingest_to_quickwit(&docs, "http://127.0.0.1:7280/api/v1/pages/ingest").await?;
+            utils::back_link_score(url, &new_urls).await;
         }
         None => {
             println!("⚠️ Skipped: {}", url);
@@ -102,6 +121,7 @@ fn enqueue_and_mark_seen(
     let mut push_count = 0; // <-- track number of added URLs
 
     for ((url, _), added) in new_urls.iter().zip(results) {
+        println!("Added url {}, {}", url, added);
         if added == 1 {
             push_pipe.cmd("LPUSH").arg(paths::CRAWL_LIST_PATH).arg(url);
             push_count += 1;
@@ -110,6 +130,7 @@ fn enqueue_and_mark_seen(
 
     if push_count > 0 {
         let _: RedisResult<()> = push_pipe.query(&mut **conn);
+        println!("Added {} urls", push_count);
     }
 
     Ok(())
@@ -117,17 +138,30 @@ fn enqueue_and_mark_seen(
 
 fn ensure_bloom_filter(conn: &mut r2d2::PooledConnection<RedisConnectionManager>) {
     let _: RedisResult<()> = cmd("BF.RESERVE")
-        .arg("crawl_seen") // filter key
+        .arg(paths::CRAWL_SEEN) // filter key
         .arg(0.01) // 1% false positive rate
         .arg(1_000_000_000) // initial capacity
         .query(&mut **conn);
 
+    let _: RedisResult<()> = cmd("BF.RESERVE")
+        .arg(paths::URL_SCORE_FILTER) // filter key
+        .arg(0.01) // 1% false positive rate
+        .arg(1_000_000_000) // initial capacity
+        .query(&mut **conn);
+
+    let _: RedisResult<()> = cmd("BF.RESERVE")
+        .arg(paths::DOMAIN_SCORE_FILTER) // filter key
+        .arg(0.01) // 1% false positive rate
+        .arg(100_000_000) // initial capacity
+        .query(&mut **conn);
+
     let _: RedisResult<()> = cmd("EXPIRE")
-        .arg("crawl_seen")
+        .arg(paths::CRAWL_SEEN)
         .arg(60 * 60 * 24 * 31) // seconds
         .query(&mut **conn);
-}
 
+    println!("Creating KV Filters");
+}
 
 async fn refill_if_empty(conn: &mut r2d2_redis::redis::Connection) {
     let len: i64 = cmd("LLEN")
@@ -147,10 +181,7 @@ async fn refill_if_empty(conn: &mut r2d2_redis::redis::Connection) {
             println!("⚙️ Acquired lock — refilling from DOMAINS_SET...");
 
             // Optional: auto-expire lock after 30s to avoid deadlocks
-            let _: RedisResult<()> = cmd("EXPIRE")
-                .arg("crawler:refill_lock")
-                .arg(30)
-                .query(conn);
+            let _: RedisResult<()> = cmd("EXPIRE").arg("crawler:refill_lock").arg(30).query(conn);
 
             // Perform refill
             let domains = DOMAINS_SET;
@@ -174,4 +205,34 @@ async fn refill_if_empty(conn: &mut r2d2_redis::redis::Connection) {
     }
 
     sleep(Duration::from_secs(10)).await;
+}
+
+pub async fn ingest_to_quickwit(data: &Value, endpoint: &str) -> Result<()> {
+    let client = Client::new();
+    let mut ndjson = String::new();
+
+    match data {
+        Value::Array(arr) => {
+            for item in arr {
+                ndjson.push_str(&serde_json::to_string(item)?);
+                ndjson.push('\n');
+            }
+        }
+        Value::Object(_) => {
+            ndjson.push_str(&serde_json::to_string(data)?);
+            ndjson.push('\n');
+        }
+        _ => anyhow::bail!("Input must be a JSON object or array of objects"),
+    }
+
+    let resp = client
+        .post(endpoint)
+        .header("Content-Type", "application/x-ndjson")
+        .body(ndjson)
+        .send()
+        .await?;
+
+    println!("✅ Status: {}", resp.status());
+    println!("🔹 Response: {}", resp.text().await?);
+    Ok(())
 }

@@ -81,12 +81,12 @@ search_settings:
 
 # curl http://127.0.0.1:7280/api/v1/pages/search?query=title:INF
 
-curl -XPOST "http://127.0.0.1:7280/api/v1/pages/ingest" \
-  -H "Content-Type: application/x-ndjson" \
-  --data-binary @- <<'EOF'
-{"url":"https://example.com/new1","title":"New Page 3","crawl_timestamp":1731240000,"cleaned_text":"Some example text"}
-{"url":"https://example.com/new2","title":"New Page 4","crawl_timestamp":1731240000,"cleaned_text":"Another text"}
-EOF
+# curl -XPOST "http://127.0.0.1:7280/api/v1/pages/ingest" \
+#   -H "Content-Type: application/x-ndjson" \
+#   --data-binary @- <<'EOF'
+# {"url":"https://example.com/new1","title":"New Page 3","crawl_timestamp":1731240000,"cleaned_text":"Some example text"}
+# {"url":"https://example.com/new2","title":"New Page 4","crawl_timestamp":1731240000,"cleaned_text":"Another text"}
+# EOF
 
 
 # curl -XPOST "http://127.0.0.1:7280/api/v1/pages/ingest" \

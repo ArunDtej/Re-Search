@@ -35,7 +35,10 @@ pub struct CrawlResult {
     pub links: Vec<String>,
 }
 
-pub fn crawl_page(url: &str) ->Result<Option<CrawlResult>, Box<dyn std::error::Error + Send + Sync>> {
+pub fn crawl_page(raw_url: &str) ->Result<Option<CrawlResult>, Box<dyn std::error::Error + Send + Sync>> {
+    let url = &clean_url(raw_url).unwrap_or_else(|| raw_url.to_string());
+
+
     let mut easy = Easy::new();
     easy.url(url)?;
     easy.follow_location(true)?;
